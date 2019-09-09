@@ -115,7 +115,7 @@ def main():
             fold_val_preds.append(best_val_scores)
 
         if enable_ckpt_ensemble:
-            ckpt_weights = [2**e for e in range(args.epochs)]
+            ckpt_weights = [2**e for e in range(epochs)]
             val_scores = np.average(single_val_preds, weights=ckpt_weights, axis=0)
             ckpt_val_preds.append(val_scores)
             print('{"metric": "Ckpt CV Val. AUC", "value": %.4f, "epoch": %d}' % (
