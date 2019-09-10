@@ -25,11 +25,6 @@ which_fold = 0  # should be int in [0, n_splits-1]
 ckpt_per_fold = True
 enable_ckpt_ensemble = False
 keep_ema = False
-
-# grad_clip = None  # Use a value of 0.5 if gradients are exploding, which may happen
-                  # at larger batch sizes (sometimes at 32) - you will recognize it
-                  # by a sorting error in the MuliBox loss calculation
-
 # cudnn.benchmark = True
 
 

@@ -1,116 +1,54 @@
-from utils import *
+import time
+import torch
+from torchvision import models
+from torch.utils.data import DataLoader
+from datasets import *
 from model import *
 from solver import *
+from utils import *
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 SEED = 2019
-path = '../input/jigsaw-unintended-bias-in-toxicity-classification/'
+
+# Data parameters
+data_path = '../input/'  # path of data files
+model_path = '../models/'
 output_path = './'
-EMBEDDING_FILES = [
-    # '../input/pickled-glove840b300d-for-10sec-loading/glove.840B.300d.pkl',
-    # '../input/pickled-paragram-300-vectors-sl999/paragram_300_sl999.pkl',
-    '../input/pickled-crawl300d2m-for-kernel-competitions/crawl-300d-2M.pkl'
-]
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--maxlen', type=int, default=220)
-parser.add_argument('--vocab-size', type=int, default=100000)
-parser.add_argument('--nb-models', type=int, default=5,
-                    help='number of models (folds) to ensemble')
-parser.add_argument('--epochs', type=int, default=6)
-parser.add_argument('--enable-ckpt-ensemble', type=bool, default=1)
-parser.add_argument('--ckpt-per-fold', type=bool, default=1)
-args = parser.parse_args()
+# Learning parameters
+batch_size = 128  # batch size
+img_size = 196  # resized image size
+n_splits = 5
+which_fold = 0  # should be int in [0, n_splits-1]
+tta = True
 
 
-def convert_dataframe_to_bool(df):
-    def convert_to_bool(df, col_name):
-        df[col_name] = np.where(df[col_name] >= 0.5, True, False)
+def main():
+    test_id = [f.split('.')[0] for f in os.listdir(data_path+'test')]
 
-    bool_df = df.copy()
-    for col in [label_column] + identity_columns + aux_columns:
-        convert_to_bool(bool_df, col)
-    return bool_df
+    # Load pretrained net
+    net = models.resnet50(pretrained=True)
 
-def load_and_preproc():
-    train_df = pd.read_csv(path+'train.csv')
-    test_df = pd.read_csv(path+'test.csv')
-    train_df[identity_columns] = train_df[identity_columns].copy().fillna(0)
+    # Prepare data
+    if tta:
+        test_datasets = [HCDDataset(path)] + [HCDDataset(path, tta=True)]*6
+    else:
+        test_dataset = HCDDataset(path)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size)
 
-    print('cleaning text...')
-    t0 = time.time()
-    train_df[text_column] = train_df[text_column].apply(clean_text)
-    test_df[text_column] = test_df[text_column].apply(clean_text)
-    print('cleaning complete in {:.0f} seconds.'.format(time.time()-t0))
+    model_states = torch.load(model_path+'models.pt')
+    model = HCDNet(copy.deepcopy(net))
+    model.load_state_dict(model_states[f'fold_{which_fold}'])
 
-    sample_weights = np.ones(len(train_df))
-    sample_weights += train_df[identity_columns].values.sum(1) * 3
-    sample_weights += train_df[label_column].values * 8
-    sample_weights /= sample_weights.max()
-    train_tars = train_df[label_column].values
-    train_tars = np.vstack([train_tars, sample_weights]).T.astype('float32')
+    model = model.to(device)
+    if tta:
+        pred_test = TTA(test_datasets, model)
+    else:
+        pred_test = get_preds(test_loader, model)
 
-    train_df = convert_dataframe_to_bool(train_df)
-    df = train_df[[label_column]+identity_columns].copy()
-    df[label_column] = df[label_column].astype('uint8')
-
-    return train_df[text_column], train_tars, test_df[text_column], df, test_df['id']
+    submit = pd.DataFrame({'id':test_id, 'label':pred_test})
+    submit.to_csv(output_path+'submission.csv', index=False)
 
 
-
-## main()
-np.random.seed(SEED)
-train_seq, train_tars, x_test, trn_df, test_id = load_and_preproc()
-
-print('tokenizing...')
-t0 = time.time()
-word_to_idx, idx_to_word = word_idx_map(train_seq.tolist()+x_test.tolist(), args.vocab_size)
-train_seq = tokenize(train_seq, word_to_idx, args.maxlen)
-x_test = tokenize(x_test, word_to_idx, args.maxlen)
-print('tokenizing complete in {:.0f} seconds.'.format(time.time()-t0))
-
-
-print('loading embeddings...')
-t0 = time.time()
-embed_mat = np.concatenate(
-    [get_embedding(f, word_to_idx) for f in EMBEDDING_FILES], axis=-1)
-# embed_mat = np.mean(
-#     [get_embedding(f, word_to_idx) for f in EMBEDDING_FILES], axis=0)
-print('loading complete in {:.0f} seconds.'.format(time.time()-t0))
-
-
-# preparation
-test_preds = []     # for the predictions on the testset
-test_loader, test_original_indices = prepare_loader(x_test, split='test')
-
-# model setup
-models = torch.load(model_path+'models.pt')
-
-# inference
-if args.enable_ckpt_ensemble:
-    ckpt_weights = [2**e for e in range(args.epochs)]
-    for i in range(args.nb_models):
-        single_test_preds = []
-        for e in range(args.epochs):
-            model = JigsawNet(*embed_mat.shape, 128, embed_mat)
-            model = model.to(device)
-            model.load_state_dict(models[f'fold_{i}_epk_{e}'])
-            test_scores = eval_model(model, test_loader)
-            single_test_preds.append(test_scores[test_original_indices])
-        test_preds.append(np.average(single_test_preds, weights=ckpt_weights, axis=0))
-
-if args.ckpt_per_fold:
-    for i in range(args.nb_models):
-        model = JigsawNet(*embed_mat.shape, 128, embed_mat)
-        model = model.to(device)
-        model.load_state_dict(models[f'fold_{i}'])
-        test_scores = eval_model(model, test_loader)
-        test_preds.append(test_scores[test_original_indices])
-
-
-# submission file
-test_preds = np.mean(test_preds, 0)
-submission = pd.DataFrame.from_dict({
-    'id': test_id,
-    'prediction': test_preds
-})
-submission.to_csv('submission.csv', index=False)
+if __name__ == '__main__':
+    main()
