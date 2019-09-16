@@ -21,6 +21,7 @@ img_size = 196  # resized image size
 n_splits = 5
 which_fold = 0  # should be int in [0, n_splits-1]
 tta = True
+is_nnavg = True
 
 
 def main():
@@ -36,15 +37,37 @@ def main():
         test_dataset = HCDDataset(path)
         test_loader = DataLoader(test_dataset, batch_size=batch_size)
 
-    model_states = torch.load(model_path+'models.pt')
-    model = HCDNet(copy.deepcopy(net))
-    model.load_state_dict(model_states[f'fold_{which_fold}'])
+    if not is_nnavg:
+        model_states = torch.load(model_path+'models.pt')
+        model = HCDNet(copy.deepcopy(net))
+        model.load_state_dict(model_states[f'fold_{which_fold}'])
 
-    model = model.to(device)
-    if tta:
-        pred_test = TTA(test_datasets, model)
+        model = model.to(device)
+        if tta:
+            pred_test = TTA(test_datasets, model)
+        else:
+            pred_test = get_preds(test_loader, model)
+
     else:
-        pred_test = get_preds(test_loader, model)
+        avgd_model = HCDNet(copy.deepcopy(net))
+        avgd = NNAverage(avgd_model, 1./n_splits)
+
+        for i in range(n_splits):
+            m_path = model_path+f'hcd-rn50-{i}/'
+            model_states = torch.load(m_path+'models.pt')
+            model = HCDNet(copy.deepcopy(net))
+            model.load_state_dict(model_states[f'fold_{i}'])
+            avgd.update(model)
+
+        avgd.set_weights(avgd_model)
+        avgd_model = avgd_model.to(device)
+        forward_model(avgd_model, train_loader)
+
+        if tta:
+            pred_test = TTA(test_datasets, avgd_model)
+        else:
+            pred_test = get_preds(test_loader, avgd_model)
+
 
     submit = pd.DataFrame({'id':test_id, 'label':pred_test})
     submit.to_csv(output_path+'submission.csv', index=False)

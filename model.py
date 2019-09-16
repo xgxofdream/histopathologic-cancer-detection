@@ -120,6 +120,25 @@ class WeightEMA(object):
             self.sample_cnt = self.sample_rate
 
 
+class NNAverage(object):
+    def __init__(self, model, mu=0.5):
+        self.mu = mu
+        self.weight_copy = {}
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                self.weight_copy[name] = 0
+
+    def update(self, model):
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                self.weight_copy[name] += self.mu * param.data
+
+    def set_weights(self, avg_model):
+        for name, param in avg_model.named_parameters():
+            if param.requires_grad:
+                param.data = self.weight_copy[name]
+
+
 def model_optimizer_init(pretrained_net):
     model = HCDNet(copy.deepcopy(pretrained_net))
 
