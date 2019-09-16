@@ -17,11 +17,11 @@ output_path = './'
 
 # Learning parameters
 batch_size = 128  # batch size
-img_size = 196  # resized image size
-n_splits = 5
-which_fold = 0  # should be int in [0, n_splits-1]
-tta = True
-is_nnavg = True
+img_size = 196    # resized image size
+n_splits = 5      # K-fold data split
+which_fold = 0    # should be int in [0, n_splits-1]
+tta = True        # test time augmentation
+is_nnavg = True   # ensemble models from weight averaging or not
 
 
 def main():
