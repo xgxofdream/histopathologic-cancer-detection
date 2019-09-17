@@ -13,6 +13,7 @@ SEED = 2019
 
 # Data parameters
 data_path = '../input/'  # path of data files
+pred_path = '../input/hcd-plabels/'
 output_path = './'
 
 # Learning parameters
@@ -38,26 +39,30 @@ def main():
     # nb_train = train_df.shape[0]  # 220025
     # nb_test = len(os.listdir(data_path+'test'))  # 57458
 
+    # load pseudo labels
+    pred_df = pd.read_csv(pred_path+'submission.csv')
+
     # training preparation
     fold_val_preds = []     # oof predictions for ensemble of folds
     ckpt_val_preds = []     # oof predictions for ensemble of ckpts
     ema_val_preds = []      # oof predictions for ensemble from ema of weights
     oof_targets = []
     cv_indices = train_val_split(train_df, which_fold)
-    # test_dataset = HCDDataset(data_path)
-    # test_loader = DataLoader(test_dataset, batch_size=batch_size)
+    cv_indices_test = list(KFold(n_splits=n_splits, shuffle=True, random_state=SEED).split(pred_df))
+    if which_fold is not None:
+        cv_indices_test = [cv_indices_test[which_fold]]
 
     # Load pretrained net
     net = models.resnet50(pretrained=True)
 
     # Training
     model_ckpts = {}
-    for _, (trn_idx, val_idx) in enumerate(cv_indices):
+    for _, ((trn_idx, val_idx), (trn_idx_test, __)) in enumerate(zip(cv_indices, cv_indices_test)):
         i = which_fold
         print(f'Fold {i+1}')
 
         # prepare data
-        train_dataset = HCDDataset(data_path, trn_idx, train_df)
+        train_dataset = HCDPseudoDataset(data_path, trn_idx, trn_idx_test, train_df, pred_df)
         val_dataset = HCDDataset(data_path, val_idx, train_df, valid=True)
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
         val_loader = DataLoader(val_dataset, batch_size=batch_size)
