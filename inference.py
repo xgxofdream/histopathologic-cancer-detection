@@ -24,6 +24,9 @@ tta = True        # test time augmentation
 is_nnavg = True   # ensemble models from weight averaging or not
 
 
+def load_meta_data():
+    return pd.read_csv(data_path+'train_labels.csv')
+
 def main():
     test_id = [f.split('.')[0] for f in os.listdir(data_path+'test')]
 
@@ -49,6 +52,12 @@ def main():
             pred_test = get_preds(test_loader, model)
 
     else:
+        train_df = load_meta_data()
+        mask = np.random.rand(len(train_df)) < 0.8
+        trn_idx = np.arange(len(train_df))[mask]
+        train_dataset = HCDDataset(data_path, trn_idx, df=train_df)
+        train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True)
+
         avgd_model = HCDNet(copy.deepcopy(net))
         avgd = NNAverage(avgd_model, 1./n_splits)
 
