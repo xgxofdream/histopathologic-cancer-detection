@@ -11,6 +11,8 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
+from train import *
+
 
 # Random seed for torch
 def seed_torch(seed=SEED):
